@@ -32,12 +32,6 @@ import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 
-# ub_a_bis_z_urls = [
-#     'https://www.tu-braunschweig.de/ub/ausleihen-onlinezugriff',
-#     'https://www.tu-braunschweig.de/ub/wir-ueber-uns/ub-von-a-z/allegro-c'
-#     ]
-
-ub_a_bis_z_urls = ['https://www.tu-braunschweig.de/ub/wir-ueber-uns/ub-von-a-z/allegro-c']
 
 
 # Set protobuf environment variable to avoid error messages
@@ -81,10 +75,6 @@ def extract_model_names(
     return model_names
 
 
-def create_docs_from_urls(urls) -> List[Document]:
-    loader = WebBaseLoader(ub_a_bis_z_urls)
-    docs = loader.load()
-    return docs
 
 
 def process_question(question: str, vector_db: Chroma, selected_model: str) -> str:
@@ -100,10 +90,11 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
         str: The generated response to the user's question.
     """
     logger.info(f"Processing question: {question} using model: {selected_model}")
-    
+
     # Initialize LLM
     llm = ChatOllama(model=selected_model)
-    
+
+
     # Query prompt template
     QUERY_PROMPT = PromptTemplate(
         input_variables=["question"],
@@ -114,6 +105,23 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
         similarity search. Provide these alternative questions separated by newlines.
         Original question: {question}""",
     )
+
+
+
+
+    # Query prompt template
+    QUERY_PROMPT = PromptTemplate(
+        input_variables=["question"],
+        template="""Sie sind ein KI-Sprachmodell-Assistent. Ihre Aufgabe ist es, 2 verschiedene
+        verschiedene Versionen der gegebenen Benutzerfrage zu generieren, um relevante Dokumente aus
+        einer Vektordatenbank zu finden. Indem Sie mehrere Perspektiven auf die Benutzerfrage generieren, wollen Sie
+        Ziel ist es, dem Benutzer zu helfen, einige der Einschränkungen der entfernungsbasierten
+        Ähnlichkeitssuche zu überwinden. Geben Sie diese alternativen Fragen durch Zeilenumbrüche getrennt ein.
+        Ursprüngliche Frage: {question}""",
+    )
+
+
+
 
     # Set up retriever
     retriever = MultiQueryRetriever.from_llm(
@@ -127,7 +135,7 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
     {context}
     Question: {question}
     """
-    
+
     # Create prompt
     prompt = ChatPromptTemplate.from_template(template)
 
@@ -166,8 +174,8 @@ def delete_vector_db(vector_db: Optional[Chroma]) -> None:
 
 # Taken from:
 # https://github.com/andrea-nuzzo/markdown-langchain-rag/blob/main/DocumentManager.py
-def load_documents() -> List[Document]:
-    loader = loader = DirectoryLoader("./documents", glob="./*.md", show_progress=True, loader_cls=UnstructuredMarkdownLoader)
+def load_documents(path) -> List[Document]:
+    loader = loader = DirectoryLoader(path, glob="./*.md", show_progress=True, loader_cls=UnstructuredMarkdownLoader)
     return loader.load()
 
 def split_documents(docs) -> List[Document]:
@@ -184,6 +192,9 @@ def main() -> None:
     Main function to run the Streamlit application.
     """
     st.subheader("🧠 Ollama UB RAG playground", divider="gray", anchor=False)
+
+    korpora_path = "/data/ub-llm/korpora/";
+    korpora_list = os.listdir(korpora_path);
 
     # Get available models
     models_info = ollama.list()
@@ -207,13 +218,29 @@ def main() -> None:
             available_models,
             key="model_select"
         )
+    # Korpus selection
+    if korpora_list:
+        selected_korpus = col2.selectbox(
+            "Pick a korpus available locally on your system ↓",
+            korpora_list,
+            key="korpus_select"
+        )
+   # select embedding model
+    if available_models:
+        selected_embedding_model = col2.selectbox(
+            "Pick an embedding model available locally on your system ↓",
+            available_models,
+            key="embedding_select"
+        )
+
+
 
     # Temp always regenerate
     #delete_vector_db(st.session_state["vector_db"]) 
 
     if st.session_state["vector_db"] is None:
-        # docs = create_docs_from_urls(ub_a_bis_z_urls)
-        docs = load_documents()
+        selected_korpus = korpora_path + selected_korpus
+        docs = load_documents(selected_korpus)
         if docs:
             for doc in docs:
                 logger.info(doc.metadata)
@@ -225,7 +252,7 @@ def main() -> None:
                 chunks = split_documents(docs)
                 st.session_state["vector_db"] = Chroma.from_documents(
                     documents=chunks,
-                    embedding=OllamaEmbeddings(model="nomic-embed-text"),
+                    embedding=OllamaEmbeddings(model=selected_embedding_model),
                     collection_name="myRAG"
                 )
         else:
