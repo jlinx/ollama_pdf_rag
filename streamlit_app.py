@@ -225,6 +225,15 @@ def main() -> None:
             korpora_list,
             key="korpus_select"
         )
+   # select embedding model
+    if available_models:
+        selected_embedding_model = col2.selectbox(
+            "Pick an embedding model available locally on your system ↓",
+            available_models,
+            key="embedding_select"
+        )
+
+
 
     # Temp always regenerate
     #delete_vector_db(st.session_state["vector_db"]) 
@@ -243,7 +252,7 @@ def main() -> None:
                 chunks = split_documents(docs)
                 st.session_state["vector_db"] = Chroma.from_documents(
                     documents=chunks,
-                    embedding=OllamaEmbeddings(model="nomic-embed-text"),
+                    embedding=OllamaEmbeddings(model=selected_embedding_model),
                     collection_name="myRAG"
                 )
         else:
