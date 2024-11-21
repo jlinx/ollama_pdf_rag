@@ -90,10 +90,11 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
         str: The generated response to the user's question.
     """
     logger.info(f"Processing question: {question} using model: {selected_model}")
-    
+
     # Initialize LLM
     llm = ChatOllama(model=selected_model)
-    
+
+
     # Query prompt template
     QUERY_PROMPT = PromptTemplate(
         input_variables=["question"],
@@ -104,6 +105,23 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
         similarity search. Provide these alternative questions separated by newlines.
         Original question: {question}""",
     )
+
+
+
+
+    # Query prompt template
+    QUERY_PROMPT = PromptTemplate(
+        input_variables=["question"],
+        template="""Sie sind ein KI-Sprachmodell-Assistent. Ihre Aufgabe ist es, 2 verschiedene
+        verschiedene Versionen der gegebenen Benutzerfrage zu generieren, um relevante Dokumente aus
+        einer Vektordatenbank zu finden. Indem Sie mehrere Perspektiven auf die Benutzerfrage generieren, wollen Sie
+        Ziel ist es, dem Benutzer zu helfen, einige der Einschränkungen der entfernungsbasierten
+        Ähnlichkeitssuche zu überwinden. Geben Sie diese alternativen Fragen durch Zeilenumbrüche getrennt ein.
+        Ursprüngliche Frage: {question}""",
+    )
+
+
+
 
     # Set up retriever
     retriever = MultiQueryRetriever.from_llm(
@@ -117,7 +135,7 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
     {context}
     Question: {question}
     """
-    
+
     # Create prompt
     prompt = ChatPromptTemplate.from_template(template)
 
