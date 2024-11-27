@@ -25,11 +25,15 @@ from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.document_loaders import DirectoryLoader
 from langchain_community.document_loaders import UnstructuredMarkdownLoader
 from typing import List, Tuple, Dict, Any, Optional
+from langchain.globals import set_debug
+from langchain_core.runnables import RunnableLambda
+
 
 # add missing pysqlite3  pysqlite3-binary
 __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+#set_debug(True)
 
 
 
@@ -74,7 +78,11 @@ def extract_model_names(
     logger.info(f"Extracted model names: {model_names}")
     return model_names
 
-
+def inspect(state):
+    """Print the state passed between Runnables in a langchain and pass it on"""
+    print("retrived documents")
+    print(state)
+    return state
 
 
 def process_question(question: str, vector_db: Chroma, selected_model: str) -> str:
@@ -112,7 +120,7 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
     # Query prompt template
     QUERY_PROMPT = PromptTemplate(
         input_variables=["question"],
-        template="""Sie sind ein KI-Sprachmodell-Assistent. Ihre Aufgabe ist es, 2 verschiedene
+        template="""Sie sind ein KI-Sprachmodell-Assistent. Sie antworten immer auf Detsch.Ihre Aufgabe ist es, 2 verschiedene
         verschiedene Versionen der gegebenen Benutzerfrage zu generieren, um relevante Dokumente aus
         einer Vektordatenbank zu finden. Indem Sie mehrere Perspektiven auf die Benutzerfrage generieren, wollen Sie
         Ziel ist es, dem Benutzer zu helfen, einige der Einschränkungen der entfernungsbasierten
@@ -121,14 +129,23 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
     )
 
 
-
-
-    # Set up retriever
-    retriever = MultiQueryRetriever.from_llm(
-        vector_db.as_retriever(), 
-        llm,
-        prompt=QUERY_PROMPT
+    retriever = vector_db.as_retriever(
+        search_type="similarity", search_kwargs={"k": 3  }
     )
+
+#     Set up Multi query retriever
+#    retriever = MultiQueryRetriever.from_llm(
+#        vector_db.as_retriever(), 
+#        llm,
+#        prompt=QUERY_PROMPT
+#    )
+
+#NW
+#    retriever = ParentDocumentRetriever(
+#        vectorstore=vectorstore,
+#        docstore=store,
+#        child_splitter=child_splitter,
+#    )
 
     # RAG prompt template
     template = """Du bist eine künstliche Intelligenz, die in der Universitätsbibliothek (UB) der Technischen Universität Braunscheig (TUBS) arbeitet. Vor diesem Hintergrund, beantworten Sie die Frage NUR auf der Grundlage des folgenden Kontextes:
@@ -142,6 +159,7 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
     # Create chain
     chain = (
         {"context": retriever, "question": RunnablePassthrough()}
+        | RunnableLambda(inspect)  
         | prompt
         | llm
         | StrOutputParser()
