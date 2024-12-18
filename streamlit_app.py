@@ -27,6 +27,7 @@ from langchain_community.document_loaders import UnstructuredMarkdownLoader
 from typing import List, Tuple, Dict, Any, Optional
 from langchain.globals import set_debug
 from langchain_core.runnables import RunnableLambda
+from langchain_core.runnables import RunnableParallel
 
 
 # add missing pysqlite3  pysqlite3-binary
@@ -34,8 +35,6 @@ __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 #set_debug(True)
-
-
 
 
 # Set protobuf environment variable to avoid error messages
@@ -80,9 +79,14 @@ def extract_model_names(
 
 def inspect(state):
     """Print the state passed between Runnables in a langchain and pass it on"""
-    print("retrived documents")
-    print(state)
+#    print("retrived documents")
+#    print(state)
     return state
+
+
+def format_docs(docs):
+#    return "A"
+   return "\n\n".join(doc.page_content for doc in docs)
 
 
 def process_question(question: str, vector_db: Chroma, selected_model: str) -> str:
@@ -162,10 +166,27 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
         | RunnableLambda(inspect)  
         | prompt
         | llm
+        | RunnableLambda(inspect)
         | StrOutputParser()
     )
 
-    response = chain.invoke(question)
+
+    rag_chain_from_docs = (
+        RunnablePassthrough.assign(context=(lambda x: format_docs(x["context"])))
+        | prompt
+        | llm
+        | StrOutputParser()
+    )
+
+    rag_chain_with_source = RunnableParallel(
+        {"context": retriever, "question": RunnablePassthrough()}
+    ).assign(answer=rag_chain_from_docs)
+
+
+
+#    response = chain.invoke(question)
+    response = rag_chain_with_source.invoke(question)
+
     logger.info("Question processed and response generated")
     return response
 
@@ -201,6 +222,8 @@ def split_documents(docs) -> List[Document]:
     text_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
     all_sections = list()
     for doc in docs:
+        print("SEP")
+        #print (doc.metadata)
         sections = text_splitter.split_text(doc.page_content)
         all_sections.extend(sections)
     return all_sections
@@ -265,11 +288,10 @@ def main() -> None:
                 # logger.info(doc.page_content)
                 
             if st.session_state["vector_db"] is None:
-                # text_splitter = RecursiveCharacterTextSplitter(chunk_size=7500, chunk_overlap=100)
-                # chunks = text_splitter.split_documents(sections)
                 chunks = split_documents(docs)
                 st.session_state["vector_db"] = Chroma.from_documents(
-                    documents=chunks,
+#                    documents=chunks,
+                    documents=docs,
                     embedding=OllamaEmbeddings(model=selected_embedding_model),
                     collection_name="myRAG"
                 )
@@ -315,14 +337,17 @@ def main() -> None:
                             response = process_question(
                                 prompt, st.session_state["vector_db"], selected_model
                             )
-                            st.markdown(response)
+                            d = response["context"][0]
+
+                            st.markdown(str(response["answer"] +"\n"+ d.metadata["source"]) )
                         else:
                             st.warning("Please upload a PDF file first.")
 
                 # Add assistant response to chat history
                 if st.session_state["vector_db"] is not None:
+                    #print(response)
                     st.session_state["messages"].append(
-                        {"role": "assistant", "content": response}
+                        {"role": "assistant", "content": str(response["answer"] +"\n"+ d.metadata["source"]) }
                     )
 
             except Exception as e:
