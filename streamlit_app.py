@@ -35,7 +35,7 @@ __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 #set_debug(True)
-
+expert_gui = False
 
 # Set protobuf environment variable to avoid error messages
 # This might cause some issues with latency but it's a tradeoff
@@ -244,7 +244,7 @@ def main() -> None:
     available_models = extract_model_names(models_info)
 
     # Create layout
-    col1, col2 = st.columns([1.5, 2])
+    col1, col2 = st.columns([0.1 , 0.9])
 
     # Initialize session state
     if "messages" not in st.session_state:
@@ -269,14 +269,14 @@ def main() -> None:
             key="korpus_select"
         )
    # select embedding model
-    if available_models:
+    if expert_gui and available_models:
         selected_embedding_model = col2.selectbox(
             "Pick an embedding model available locally on your system ↓",
             available_models,
             key="embedding_select"
         )
-
-
+    else:
+       selected_embedding_model= "nomic-embed-text:latest"
 
     # Temp always regenerate
     #delete_vector_db(st.session_state["vector_db"]) 
@@ -303,7 +303,7 @@ def main() -> None:
     
 
     # Delete collection button
-    delete_collection = col1.button(
+    delete_collection = col2.button(
         "📚 Reload data", 
         type="secondary",
         key="delete_button"
