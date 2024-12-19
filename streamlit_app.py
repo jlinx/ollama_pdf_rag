@@ -79,13 +79,11 @@ def extract_model_names(
 
 def inspect(state):
     """Print the state passed between Runnables in a langchain and pass it on"""
-#    print("retrived documents")
-#    print(state)
+    logger.info(f"current state: {state}")
     return state
 
 
 def format_docs(docs):
-#    return "A"
    return "\n\n".join(doc.page_content for doc in docs)
 
 
@@ -184,7 +182,6 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
 
 
 
-#    response = chain.invoke(question)
     response = rag_chain_with_source.invoke(question)
 
     logger.info("Question processed and response generated")
@@ -217,13 +214,18 @@ def load_documents(path) -> List[Document]:
     loader = loader = DirectoryLoader(path, glob="./*.md", show_progress=True, loader_cls=UnstructuredMarkdownLoader)
     return loader.load()
 
+def build_response_str(response) -> str:
+    first_doc = response["context"][0]
+    src_link = "[quelle](" + first_doc.metadata["source"] + ")"
+    response_str = str(response["answer"] +""+ src_link) 
+    logger.info("response markdown: "+response_str)
+    return response_str
+
 def split_documents(docs) -> List[Document]:
     headers_to_split_on = [("#", "Header 1"), ("##", "Header 2"), ("###", "Header 3"), ("####", "Header 4")]
     text_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
     all_sections = list()
     for doc in docs:
-        print("SEP")
-        #print (doc.metadata)
         sections = text_splitter.split_text(doc.page_content)
         all_sections.extend(sections)
     return all_sections
@@ -299,8 +301,6 @@ def main() -> None:
             st.error("No website data found.")
 
     
-    # col1.markdown("Dies ist ein Test")
-
 
     # Delete collection button
     delete_collection = col1.button(
@@ -338,16 +338,14 @@ def main() -> None:
                                 prompt, st.session_state["vector_db"], selected_model
                             )
                             d = response["context"][0]
-
-                            st.markdown(str(response["answer"] +"\n"+ d.metadata["source"]) )
-                        else:
-                            st.warning("Please upload a PDF file first.")
+                            st.markdown(build_response_str(response))
+                            #st.markdown(str(response["answer"] +"\n"+ d.metadata["source"]) )
 
                 # Add assistant response to chat history
                 if st.session_state["vector_db"] is not None:
                     #print(response)
                     st.session_state["messages"].append(
-                        {"role": "assistant", "content": str(response["answer"] +"\n"+ d.metadata["source"]) }
+                        {"role": "assistant", "content": build_response_str(response) }
                     )
 
             except Exception as e:
