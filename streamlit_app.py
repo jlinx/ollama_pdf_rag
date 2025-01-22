@@ -28,14 +28,22 @@ from typing import List, Tuple, Dict, Any, Optional
 from langchain.globals import set_debug
 from langchain_core.runnables import RunnableLambda
 from langchain_core.runnables import RunnableParallel
+from langchain.memory import ConversationBufferMemory
+from langchain.chains import ConversationChain
 
 
 # add missing pysqlite3  pysqlite3-binary
 __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-#set_debug(True)
+
+set_debug(True)
 expert_gui = False
+
+## add memory to bot
+#memory = ConversationBufferMemory(memory_key="chat_history")
+convo_memory = ConversationBufferMemory(memory_key="history", return_messages=True)
+
 
 # Set protobuf environment variable to avoid error messages
 # This might cause some issues with latency but it's a tradeoff
@@ -43,7 +51,7 @@ os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
 # Streamlit page configuration
 st.set_page_config(
-    page_title="Ollama PDF RAG Streamlit UI",
+    page_title="UB RAG Playground",
     page_icon="🎈",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -108,26 +116,23 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
     # Query prompt template
     QUERY_PROMPT = PromptTemplate(
         input_variables=["question"],
-        template="""You are an AI language model assistant. Your task is to generate 2
-        different versions of the given user question to retrieve relevant documents from
-        a vector database. By generating multiple perspectives on the user question, your
-        goal is to help the user overcome some of the limitations of the distance-based
-        similarity search. Provide these alternative questions separated by newlines.
-        Original question: {question}""",
-    )
-
-
-
-
-    # Query prompt template
-    QUERY_PROMPT = PromptTemplate(
-        input_variables=["question"],
         template="""Sie sind ein KI-Sprachmodell-Assistent. Sie antworten immer auf Detsch.Ihre Aufgabe ist es, 2 verschiedene
         verschiedene Versionen der gegebenen Benutzerfrage zu generieren, um relevante Dokumente aus
         einer Vektordatenbank zu finden. Indem Sie mehrere Perspektiven auf die Benutzerfrage generieren, wollen Sie
         Ziel ist es, dem Benutzer zu helfen, einige der Einschränkungen der entfernungsbasierten
         Ähnlichkeitssuche zu überwinden. Geben Sie diese alternativen Fragen durch Zeilenumbrüche getrennt ein.
         Ursprüngliche Frage: {question}""",
+    )
+
+    # Query prompt template
+    QUERY_PROMPT = PromptTemplate(
+        input_variables=["chat_history", "question"],
+        template="""Sie sind ein KI-Sprachmodell-Assistent. Sie antworten immer auf Detsch.Ihre Aufgabe ist es, 2 verschiedene
+        verschiedene Versionen der gegebenen Benutzerfrage zu generieren, um relevante Dokumente aus
+        einer Vektordatenbank zu finden. Indem Sie mehrere Perspektiven auf die Benutzerfrage generieren, wollen Sie
+        Ziel ist es, dem Benutzer zu helfen, einige der Einschränkungen der entfernungsbasierten
+        Ähnlichkeitssuche zu überwinden. Geben Sie diese alternativen Fragen durch Zeilenumbrüche getrennt ein.
+        Ursprüngliche Frage: {question} Berücksichtige die vorhergehenden Fragen des Benutzers: {chat_history}""",
     )
 
 
@@ -151,26 +156,21 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
 
     # RAG prompt template
     template = """Du bist eine künstliche Intelligenz, die in der Universitätsbibliothek (UB) der Technischen Universität Braunscheig (TUBS) arbeitet. Vor diesem Hintergrund, beantworten Sie die Frage NUR auf der Grundlage des folgenden Kontextes:
-    {context}
+    {context} {history}
     Question: {question}
     """
 
     # Create prompt
     prompt = ChatPromptTemplate.from_template(template)
 
-    # Create chain
-    chain = (
-        {"context": retriever, "question": RunnablePassthrough()}
-        | RunnableLambda(inspect)  
-        | prompt
-        | llm
-        | RunnableLambda(inspect)
-        | StrOutputParser()
-    )
-
+    #chain = ConversationChain(llm=llm, context=(lambda x: format_docs(x["context"])) ,  memory=convo_memory, verbose=True , prompt=prompt)
 
     rag_chain_from_docs = (
-        RunnablePassthrough.assign(context=(lambda x: format_docs(x["context"])))
+        RunnablePassthrough.assign(
+            history= { }, 
+            #history = convo_memory,  # Add this line
+            context=(lambda x: format_docs(x["context"])),
+        )
         | prompt
         | llm
         | StrOutputParser()
@@ -216,7 +216,14 @@ def load_documents(path) -> List[Document]:
 
 def build_response_str(response) -> str:
     first_doc = response["context"][0]
-    src_link = "[quelle](" + first_doc.metadata["source"] + ")"
+    metadata_file = first_doc.metadata["source"]
+    metadata_file = metadata_file.rsplit('/', 1)[-1]
+    metadata_file = metadata_file.rsplit('.', 1)[0]+".html"
+    metadata_file = "http://localhost/"+metadata_file
+    print(metadata_file)
+#    src_link = "[quelle](" + first_doc.metadata["source"] + ")"
+    src_link = "[quelle](" + metadata_file + ")"
+
     response_str = str(response["answer"] +""+ src_link) 
     logger.info("response markdown: "+response_str)
     return response_str
@@ -234,7 +241,7 @@ def main() -> None:
     """
     Main function to run the Streamlit application.
     """
-    st.subheader("🧠 Ollama UB RAG playground", divider="gray", anchor=False)
+    st.subheader("🧠 UB RAG playground", divider="gray", anchor=False)
 
     korpora_path = "/data/ub-llm/korpora/";
     korpora_list = os.listdir(korpora_path);
