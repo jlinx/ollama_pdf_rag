@@ -223,16 +223,22 @@ def load_documents(path) -> List[Document]:
     return loader.load()
 
 def build_response_str(response) -> str:
-    first_doc = response["context"][0]
-    metadata_file = first_doc.metadata["source"]
-    metadata_file = metadata_file.rsplit('/', 1)[-1]
-    metadata_file = metadata_file.rsplit('.', 1)[0]+".html"
-    metadata_file = "http://localhost/"+metadata_file
-    print(metadata_file)
-    src_link = "[quelle](" + metadata_file + ")"
+    response_str = ""
+    answ_str= response["answer"] 
+    print (response)
+    for i in range(0, (len(response)-1) ):
+        curr_doc = response["context"][i]
+        metadata_file = curr_doc.metadata["source"]
+        metadata_file = metadata_file.rsplit('/', 1)[-1]
+        metadata_file = metadata_file.rsplit('.', 1)[0]+".html"
+        metadata_file = "http://localhost/"+metadata_file
+        print(metadata_file)
+        src_link = "[quelle "+str(i)+"](" + metadata_file + ")"
+        response_str += str( "\n"+ src_link) 
 
-    response_str = str(response["answer"] +""+ src_link) 
+
     logger.info("response markdown: "+response_str)
+    response_str = answ_str + response_str
     return response_str
 
 def split_documents(docs) -> List[Document]:
