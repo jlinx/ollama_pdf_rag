@@ -5,10 +5,14 @@ This application allows users to upload a PDF, process it,
 and then ask questions about the content using a selected language model.
 """
 
+
+
+
 import streamlit as st
 import logging
 import os
 import ollama
+import re
 
 from langchain_community.document_loaders import UnstructuredPDFLoader
 from langchain_ollama import OllamaEmbeddings
@@ -94,8 +98,20 @@ def inspect(state):
 def format_docs(docs):
    return "\n\n".join(doc.page_content for doc in docs)
 
+def get_hist(history):
+   if len(history) < 2:
+      return " "
+   else:
+      retstr = ""
+      for element in history:
+         print(element)
+         if element["role"] == "assistant" :
+             retstr  += element["content"]      
+# remove md to prevent md halucination
+      retstr = re.sub('\[.*\]\(.*\)', '', retstr)
+      return retstr
 
-def process_question(question: str, vector_db: Chroma, selected_model: str) -> str:
+def process_question(question: str, vector_db: Chroma, selected_model: str, history: dict) -> str:
     """
     Process a user question using the vector database and selected language model.
 
@@ -108,6 +124,8 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
         str: The generated response to the user's question.
     """
     logger.info(f"Processing question: {question} using model: {selected_model}")
+    logger.info(history)
+
 
     # Initialize LLM
     llm = ChatOllama(model=selected_model)
@@ -137,28 +155,20 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
 
 
     retriever = vector_db.as_retriever(
-        search_type="similarity", search_kwargs={"k": 3  }
+        search_type="similarity", search_kwargs={"k": 2  }
     )
 
-#     Set up Multi query retriever
-#    retriever = MultiQueryRetriever.from_llm(
-#        vector_db.as_retriever(), 
-#        llm,
-#        prompt=QUERY_PROMPT
-#    )
-
-#NW
-#    retriever = ParentDocumentRetriever(
-#        vectorstore=vectorstore,
-#        docstore=store,
-#        child_splitter=child_splitter,
-#    )
 
     # RAG prompt template
-    template = """Du bist eine künstliche Intelligenz, die in der Universitätsbibliothek (UB) der Technischen Universität Braunscheig (TUBS) arbeitet. Vor diesem Hintergrund, beantworten Sie die Frage NUR auf der Grundlage des folgenden Kontextes:
-    {context} {history}
+    template = """Du bist eine künstliche Intelligenz, die in der Universitätsbibliothek (UB) der Technischen Universität Braunscheig (TUBS) arbeitet.  DU ANTWORTEST NUR AUF DEUTSCH !
+    Vor diesem Hintergrund, beantworten Sie die Frage  auf der Grundlage des folgenden Kontextes und den vorhergehenden Antworten:
+    {context} 
+    vorhergehenden Antworten:  {{HISTORY}} 
     Question: {question}
     """
+
+    template = template.replace("{{HISTORY}}", get_hist(history))
+    print(template)
 
     # Create prompt
     prompt = ChatPromptTemplate.from_template(template)
@@ -166,9 +176,7 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
     #chain = ConversationChain(llm=llm, context=(lambda x: format_docs(x["context"])) ,  memory=convo_memory, verbose=True , prompt=prompt)
 
     rag_chain_from_docs = (
-        RunnablePassthrough.assign(
-            history= { }, 
-            #history = convo_memory,  # Add this line
+        RunnablePassthrough.assign( 
             context=(lambda x: format_docs(x["context"])),
         )
         | prompt
@@ -177,7 +185,7 @@ def process_question(question: str, vector_db: Chroma, selected_model: str) -> s
     )
 
     rag_chain_with_source = RunnableParallel(
-        {"context": retriever, "question": RunnablePassthrough()}
+        {"context": retriever, "question": RunnablePassthrough() }
     ).assign(answer=rag_chain_from_docs)
 
 
@@ -221,7 +229,6 @@ def build_response_str(response) -> str:
     metadata_file = metadata_file.rsplit('.', 1)[0]+".html"
     metadata_file = "http://localhost/"+metadata_file
     print(metadata_file)
-#    src_link = "[quelle](" + first_doc.metadata["source"] + ")"
     src_link = "[quelle](" + metadata_file + ")"
 
     response_str = str(response["answer"] +""+ src_link) 
@@ -342,7 +349,7 @@ def main() -> None:
                     with st.spinner(":green[processing...]"):
                         if st.session_state["vector_db"] is not None:
                             response = process_question(
-                                prompt, st.session_state["vector_db"], selected_model
+                                prompt, st.session_state["vector_db"], selected_model ,st.session_state["messages"]
                             )
                             d = response["context"][0]
                             st.markdown(build_response_str(response))
