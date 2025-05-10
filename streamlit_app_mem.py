@@ -5,14 +5,10 @@ This application allows users to upload a PDF, process it,
 and then ask questions about the content using a selected language model.
 """
 
-
-
-
 import streamlit as st
 import logging
 import os
 import ollama
-import re
 
 from langchain_community.document_loaders import UnstructuredPDFLoader
 from langchain_ollama import OllamaEmbeddings
@@ -34,8 +30,7 @@ from langchain_core.runnables import RunnableLambda
 from langchain_core.runnables import RunnableParallel
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationChain
-
-
+from langchain.chains import ConversationalRetrievalChain
 # add missing pysqlite3  pysqlite3-binary
 __import__('pysqlite3')
 import sys
@@ -55,7 +50,7 @@ os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
 # Streamlit page configuration
 st.set_page_config(
-    page_title="UB RAG Playground",
+    page_title="Ollama PDF RAG Streamlit UI",
     page_icon="🎈",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -98,20 +93,8 @@ def inspect(state):
 def format_docs(docs):
    return "\n\n".join(doc.page_content for doc in docs)
 
-def get_hist(history):
-   if len(history) < 2:
-      return " "
-   else:
-      retstr = ""
-      for element in history:
-         print(element)
-         if element["role"] == "assistant" :
-             retstr  += element["content"]      
-# remove md to prevent md halucination
-      retstr = re.sub('\[.*\]\(.*\)', '', retstr)
-      return retstr
 
-def process_question(question: str, vector_db: Chroma, selected_model: str, history: dict) -> str:
+def process_question(question: str, vector_db: Chroma, selected_model: str) -> str:
     """
     Process a user question using the vector database and selected language model.
 
@@ -124,8 +107,6 @@ def process_question(question: str, vector_db: Chroma, selected_model: str, hist
         str: The generated response to the user's question.
     """
     logger.info(f"Processing question: {question} using model: {selected_model}")
-    logger.info(history)
-
 
     # Initialize LLM
     llm = ChatOllama(model=selected_model)
@@ -155,42 +136,67 @@ def process_question(question: str, vector_db: Chroma, selected_model: str, hist
 
 
     retriever = vector_db.as_retriever(
-        search_type="similarity", search_kwargs={"k": 2  }
+        search_type="similarity", search_kwargs={"k": 3  }
     )
 
+#     Set up Multi query retriever
+#    retriever = MultiQueryRetriever.from_llm(
+#        vector_db.as_retriever(), 
+#        llm,
+#        prompt=QUERY_PROMPT
+#    )
+
+#NW
+#    retriever = ParentDocumentRetriever(
+#        vectorstore=vectorstore,
+#        docstore=store,
+#        child_splitter=child_splitter,
+#    )
 
     # RAG prompt template
-    template = """Du bist eine künstliche Intelligenz, die in der Universitätsbibliothek (UB) der Technischen Universität Braunscheig (TUBS) arbeitet.  DU ANTWORTEST NUR AUF DEUTSCH !
-    Vor diesem Hintergrund, beantworten Sie die Frage  auf der Grundlage des folgenden Kontextes und den vorhergehenden Antworten:
-    {context} 
-    vorhergehenden Antworten:  {{HISTORY}} 
+    template = """Du bist eine künstliche Intelligenz, die in der Universitätsbibliothek (UB) der Technischen Universität Braunscheig (TUBS) arbeitet. Vor diesem Hintergrund, beantworten Sie die Frage NUR auf der Grundlage des folgenden Kontextes:
+     {chat_history}
     Question: {question}
     """
 
-    template = template.replace("{{HISTORY}}", get_hist(history))
-    print(template)
 
     # Create prompt
     prompt = ChatPromptTemplate.from_template(template)
 
-    #chain = ConversationChain(llm=llm, context=(lambda x: format_docs(x["context"])) ,  memory=convo_memory, verbose=True , prompt=prompt)
 
-    rag_chain_from_docs = (
-        RunnablePassthrough.assign( 
-            context=(lambda x: format_docs(x["context"])),
-        )
-        | prompt
-        | llm
-        | StrOutputParser()
+#    rag_chain_from_docs = (
+#        RunnablePassthrough.assign(
+#            history= { }, 
+#            #history = convo_memory,  # Add this line
+#            context=(lambda x: format_docs(x["context"])),
+#        )
+#        | prompt
+#        | llm
+#        | StrOutputParser()
+#    )
+
+#    rag_chain_with_source = RunnableParallel(
+#        {"context": retriever, "question": RunnablePassthrough()}
+#    ).assign(answer=rag_chain_from_docs)
+
+    # Create a conversation buffer memory
+    memory = ConversationBufferMemory(memory_key='chat_history', return_messages=True)
+
+
+# Create a PromptTemplate from the custom template
+    CUSTOM_QUESTION_PROMPT = PromptTemplate.from_template(template)
+
+# Create a ConversationalRetrievalChain from an LLM with the specified components
+    conversational_chain = ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        chain_type="stuff",
+        retriever=retriever,
+        memory=memory,
+        condense_question_prompt=prompt
     )
 
-    rag_chain_with_source = RunnableParallel(
-        {"context": retriever, "question": RunnablePassthrough() }
-    ).assign(answer=rag_chain_from_docs)
-
-
-
-    response = rag_chain_with_source.invoke(question)
+    response = conversational_chain({"question":question})
+#    response = rag_chain_with_source.invoke(question)
 
     logger.info("Question processed and response generated")
     return response
@@ -223,22 +229,11 @@ def load_documents(path) -> List[Document]:
     return loader.load()
 
 def build_response_str(response) -> str:
-    response_str = ""
-    answ_str= response["answer"] 
-    print (response)
-    for i in range(0, (len(response)-1) ):
-        curr_doc = response["context"][i]
-        metadata_file = curr_doc.metadata["source"]
-        metadata_file = metadata_file.rsplit('/', 1)[-1]
-        metadata_file = metadata_file.rsplit('.', 1)[0]+".html"
-        metadata_file = "http://localhost/"+metadata_file
-        print(metadata_file)
-        src_link = "[quelle "+str(i)+"](" + metadata_file + ")"
-        response_str += str( "\n"+ src_link) 
-
-
+   # first_doc = response["context"][0]
+    #src_link = "[quelle](" + first_doc.metadata["source"] + ")"
+    #response_str = str(response["answer"] +""+ src_link) 
+    response_str = str(response["answer"] +"")
     logger.info("response markdown: "+response_str)
-    response_str = answ_str + response_str
     return response_str
 
 def split_documents(docs) -> List[Document]:
@@ -254,7 +249,7 @@ def main() -> None:
     """
     Main function to run the Streamlit application.
     """
-    st.subheader("🧠 UB RAG playground", divider="gray", anchor=False)
+    st.subheader("🧠 Ollama UB RAG playground", divider="gray", anchor=False)
 
     korpora_path = "/data/ub-llm/korpora/";
     korpora_list = os.listdir(korpora_path);
@@ -355,9 +350,8 @@ def main() -> None:
                     with st.spinner(":green[processing...]"):
                         if st.session_state["vector_db"] is not None:
                             response = process_question(
-                                prompt, st.session_state["vector_db"], selected_model ,st.session_state["messages"]
+                                prompt, st.session_state["vector_db"], selected_model
                             )
-                            d = response["context"][0]
                             st.markdown(build_response_str(response))
                             #st.markdown(str(response["answer"] +"\n"+ d.metadata["source"]) )
 
